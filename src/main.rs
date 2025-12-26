@@ -35,20 +35,9 @@ impl Message {
         }
     }
 }
-/// checks if ping is correct and returns a pong result or an error string
-fn on_ping(next_seq: u32, msg: &Message) -> Result<Message, String> {
-    if msg.label != MsgLabel::Ping {
-        return Err(format!("bad label: expected ping, got {:?}", msg.label));
-    }
-    if msg.value != next_seq {
-        return Err(format!("bad value: expected {next_seq}, got {}", msg.value));
-    }
-    let pong = Message::pong(next_seq);
-    return Ok(pong);
-}
 
 /// checks if pong is correct and returns an ok or an error string
-fn on_pong(next_seq: u32, msg: &Message) -> Result<(), String> {
+fn expect(label: MsgLabel, next_seq: u32, msg: &Message) -> Result<(), String> {
     if msg.label != MsgLabel::Pong {
         return Err(format!("bad label: expected pong, got {:?}", msg.label));
     }
