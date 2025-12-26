@@ -5,7 +5,7 @@ fn main() {
     println!("--------------------start--------------------");
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(run_async());
+    runtime.block_on(run_async()).unwrap();
 
     println!("--------------------end--------------------");
 }
@@ -58,71 +58,63 @@ fn on_pong(next_seq: u32, msg: &Message) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_async() {
+async fn run_async() -> Result<(), String> {
     let (to_b, from_a) = mpsc::channel::<Message>(8); // sends from a to b
     let (to_a, from_b) = mpsc::channel::<Message>(8); // sends from b to a
-    tokio::join!(task_a(to_b, from_b), task_b(from_a, to_a));
+    let (ra, rb) = tokio::join!(task_a(to_b, from_b), task_b(from_a, to_a));
+    ra?;
+    rb?;
+    Ok(())
 }
 
-async fn task_a(to_b: mpsc::Sender<Message>, mut from_b: mpsc::Receiver<Message>) {
+async fn task_a(
+    to_b: mpsc::Sender<Message>,
+    mut from_b: mpsc::Receiver<Message>,
+) -> Result<(), String> {
     //the pinger and pongee
     for seq in 0..5u32 {
         let ping = Message::ping(seq);
 
-        for attempt in 0..3u32 {
-            println!("A: sending \n {:?}", &ping);
-            if to_b.send(ping.clone()).await.is_err() {
-                println!("A: B dissapeared");
-                break;
-            }
-            // wait for either pong or timeout
-            let received = timeout(Duration::from_millis(500), from_b.recv()).await;
-            match received {
-                Err(e) => {
-                    println!("A: {e}"); // timed out error
-                    continue;
-                }
-                Ok(Some(msg)) => {
-                    println!("A: got \n {:?}", &msg);
-                    if let Err(e) = on_pong(seq, &msg) {
-                        println!("A: {e}");
-                        break;
-                    }
-                    break;
-                }
-                Ok(_) => {
-                    println!("A: channel is closed");
-                    break;
-                }
-            }
-        }
+        println!("A: sending \n {:?}", &ping);
+        to_b.send(ping.clone())
+            .await
+            .map_err(|_| "A: channel closed".to_string())?;
+
+        let Ok(opt) = timeout(Duration::from_millis(200), from_b.recv()).await else {
+            println!("A: timeout");
+            continue;
+        };
+        let Some(msg) = opt else {
+            return Err("A: channel closed".into());
+        };
+        println!("A: got \n  {:?}", &msg);
+        on_pong(seq, &msg)?;
+        break;
     }
+    Ok(())
 }
 
-async fn task_b(mut from_a: mpsc::Receiver<Message>, to_a: mpsc::Sender<Message>) {
+async fn task_b(
+    mut from_a: mpsc::Receiver<Message>,
+    to_a: mpsc::Sender<Message>,
+) -> Result<(), String> {
     //the pingee and ponger
     let mut next_seq: u32 = 0;
     while let Some(msg) = from_a.recv().await {
-        //handle recieved ping by responding with a pong
-        match on_ping(next_seq, &msg) {
-            Ok(pong) => {
-                println!("B: got \n {:?}", &msg);
-                next_seq += 1;
-                //simulate packet loss. drop pong every third ping
-                if pong.value % 2 == 0 && pong.value != 0 {
-                    println!("SIM: B is dropping {:?}", &pong);
-                    continue;
-                }
-                println!("B: sending \n {:?}", pong);
-                if to_a.send(pong).await.is_err() {
-                    println!("B: Channel is closed");
-                    break;
-                }
-            }
-            Err(e) => {
-                println!("B: {e}");
-                break;
-            }
+        println!("B: got {:?}", &msg);
+
+        let pong = on_ping(next_seq, &msg)?;
+        next_seq += 1;
+
+        if pong.value % 2 == 0 && pong.value != 0 {
+            println!("SIM: B dropping {:?}", &pong);
+            continue;
         }
+
+        println!("B: sending \n {:?}", &pong);
+        to_a.send(pong)
+            .await
+            .map_err(|_| "B: channel closed".to_string())?;
     }
+    Ok(())
 }
