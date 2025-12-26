@@ -76,8 +76,8 @@ async fn task_a(
         let ping: Message = Message::ping(seq);
         let mut success: bool = false;
 
-        for attempt in 0..3 {
-            println!("A: sending \n {:?}. attempt nr{attempt}", &ping);
+        for attempt in 1..4 {
+            println!("A: sending {:?}. attempt nr {attempt}", &ping);
             to_b.send(ping.clone())
                 .await
                 .map_err(|_| "A: channel closed".to_string())?;
@@ -89,7 +89,7 @@ async fn task_a(
             let Some(msg) = opt else {
                 return Err("A: channel closed".into());
             };
-            println!("A: got \n  {:?}", &msg);
+            println!("A: got  {:?}", &msg);
             on_pong(seq, &msg)?;
             success = true;
             break;
@@ -107,21 +107,48 @@ async fn task_b(
 ) -> Result<(), String> {
     //the pingee and ponger
     let mut next_seq: u32 = 0;
+    let mut last_pong: Option<Message> = None;
+
     while let Some(msg) = from_a.recv().await {
-        println!("B: got \n {:?}", &msg);
+        println!("B: got {:?}", &msg);
+        if msg.label != MsgLabel::Ping {
+            return Err(format!("B: Expected ping, got {:?}", msg.label));
+        }
+        let seq = msg.value;
 
-        let pong = on_ping(next_seq, &msg)?;
-        next_seq += 1;
+        //case 1: new ping
+        if seq == next_seq {
+            let pong = Message::pong(seq);
+            last_pong = Some(pong.clone());
+            next_seq += 1;
 
-        if pong.value % 2 == 0 && pong.value != 0 {
-            println!("SIM: B dropping {:?}", &pong);
+            //simulate dropped pong
+            if pong.value % 2 == 0 && pong.value != 0 {
+                println!("SIM: B dropping pong {:?}", pong);
+                continue;
+            }
+
+            println!("B: sending {:?}", &pong);
+            to_a.send(pong)
+                .await
+                .map_err(|_| "B: channel closed".to_string())?;
             continue;
         }
-
-        println!("B: sending \n {:?}", &pong);
-        to_a.send(pong)
-            .await
-            .map_err(|_| "B: channel closed".to_string())?;
+        //case 2: duplicate ping aka retry
+        if seq + 1 == next_seq {
+            let pong = last_pong
+                .clone()
+                .ok_or_else(|| "B: duplicate ping but no last_pong yet".to_string())?;
+            println!("B: duplicate ping {seq}, resending {:?}", pong);
+            to_a.send(pong)
+                .await
+                .map_err(|_| "B: channel closed".to_string())?;
+            continue;
+        }
+        //case 3: out of order?
+        return Err(format!(
+            "B: out of order ping: got {seq}, expected {next_seq}"
+        ));
     }
     Ok(())
 }
