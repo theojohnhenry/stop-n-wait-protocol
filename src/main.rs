@@ -9,6 +9,7 @@ fn main() {
 
     println!("end");
 }
+
 #[derive(Debug, PartialEq)]
 enum MsgLabel {
     Ping,
@@ -19,6 +20,20 @@ enum MsgLabel {
 struct Message {
     label: MsgLabel,
     value: u32,
+}
+
+fn on_ping(expected: u32, msg: Message) -> Result<Message, String> {
+    if msg.label != MsgLabel::Ping {
+        return Err("bad label".to_string());
+    }
+    if msg.value != expected {
+        return Err("bad value".to_string());
+    }
+    let pong = Message {
+        label: MsgLabel::Pong,
+        value: msg.value,
+    };
+    return Ok(pong);
 }
 
 async fn run_async() {
@@ -64,22 +79,18 @@ async fn task_a(tx: mpsc::Sender<Message>, mut ry: mpsc::Receiver<Message>) {
 }
 async fn task_b(mut rx: mpsc::Receiver<Message>, ty: mpsc::Sender<Message>) {
     //the pingee and ponger
-    let mut i: u32 = 0;
+    let mut expected: u32 = 0;
     while let Some(msg) = rx.recv().await {
         println!("B: got  {:?}!", msg);
-        println!("B: checking message");
-        if msg.value != i || msg.label != MsgLabel::Ping {
-            panic!("B: bad ping")
+        match on_ping(expected, msg) {
+            Ok(pong) => {
+                expected += 1;
+                ty.send(pong).await.unwrap();
+            }
+            Err(e) => {
+                println!("B: {e}");
+                break;
+            }
         }
-
-        i += 1;
-        println!("right iteration!");
-
-        let pong = Message {
-            label: MsgLabel::Pong,
-            value: msg.value,
-        };
-        println!("B: sent {:?}...", &pong);
-        ty.send(pong).await.unwrap();
     }
 }
