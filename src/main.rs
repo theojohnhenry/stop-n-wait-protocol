@@ -24,16 +24,26 @@ struct Message {
 
 fn on_ping(expected: u32, msg: Message) -> Result<Message, String> {
     if msg.label != MsgLabel::Ping {
-        return Err("bad label".to_string());
+        return Err(format!("bad label: expected ping, got {:?}", msg.label));
     }
     if msg.value != expected {
-        return Err("bad value".to_string());
+        return Err(format!("bad value: expected {expected}, got {}", msg.value));
     }
     let pong = Message {
         label: MsgLabel::Pong,
         value: msg.value,
     };
     return Ok(pong);
+}
+
+fn on_pong(expected: u32, msg: Message) -> Result<(), String> {
+    if msg.label != MsgLabel::Pong {
+        return Err(format!("bad label: expected pong, got {:?}", msg.label));
+    }
+    if msg.value != expected {
+        return Err(format!("bad value: expected {expected}, got {}", msg.value));
+    }
+    Ok(())
 }
 
 async fn run_async() {
@@ -50,42 +60,45 @@ async fn task_a(tx: mpsc::Sender<Message>, mut ry: mpsc::Receiver<Message>) {
             value: i,
         };
 
-        println!("A: sent {:?}...", &ping);
         if tx.send(ping).await.is_err() {
             println!("A: B dissapeared");
             break;
         }
 
         // wait for either pong or timeout
-        let recieved = timeout(Duration::from_millis(200), ry.recv()).await;
-        match recieved {
-            Ok(Some(msg)) => {
-                if msg.label != MsgLabel::Pong || msg.value != i {
-                    println!("A: bad pong {:?}", msg);
-                    break;
-                }
-                println!("A: got  {:?}", msg)
-            }
-            Ok(None) => {
-                println!("A: channel closed?");
+        let received = timeout(Duration::from_millis(200), ry.recv()).await;
+        match received {
+            Err(e) => {
+                println!("A: {e}");
                 break;
             }
-            Err(_) => {
-                println!("A: timeout mafaka");
+            Ok(Some(msg)) => {
+                if let Err(e) = on_pong(i, msg) {
+                    println!("A: {e}");
+                    break;
+                }
+                println!("A: got pong {i}");
+            }
+            Ok(_) => {
+                println!("A: channel is closed");
                 break;
             }
         }
     }
 }
+
 async fn task_b(mut rx: mpsc::Receiver<Message>, ty: mpsc::Sender<Message>) {
     //the pingee and ponger
     let mut expected: u32 = 0;
     while let Some(msg) = rx.recv().await {
-        println!("B: got  {:?}!", msg);
         match on_ping(expected, msg) {
             Ok(pong) => {
+                if ty.send(pong).await.is_err() {
+                    println!("B: Channel is closed");
+                    break;
+                }
+                println!("B: got ping {expected}");
                 expected += 1;
-                ty.send(pong).await.unwrap();
             }
             Err(e) => {
                 println!("B: {e}");
