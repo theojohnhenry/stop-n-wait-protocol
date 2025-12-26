@@ -73,23 +73,30 @@ async fn task_a(
 ) -> Result<(), String> {
     //the pinger and pongee
     for seq in 0..5u32 {
-        let ping = Message::ping(seq);
+        let ping: Message = Message::ping(seq);
+        let mut success: bool = false;
 
-        println!("A: sending \n {:?}", &ping);
-        to_b.send(ping.clone())
-            .await
-            .map_err(|_| "A: channel closed".to_string())?;
+        for attempt in 0..3 {
+            println!("A: sending \n {:?}. attempt nr{attempt}", &ping);
+            to_b.send(ping.clone())
+                .await
+                .map_err(|_| "A: channel closed".to_string())?;
 
-        let Ok(opt) = timeout(Duration::from_millis(200), from_b.recv()).await else {
-            println!("A: timeout");
-            continue;
-        };
-        let Some(msg) = opt else {
-            return Err("A: channel closed".into());
-        };
-        println!("A: got \n  {:?}", &msg);
-        on_pong(seq, &msg)?;
-        break;
+            let Ok(opt) = timeout(Duration::from_millis(200), from_b.recv()).await else {
+                println!("A: timeout");
+                continue;
+            };
+            let Some(msg) = opt else {
+                return Err("A: channel closed".into());
+            };
+            println!("A: got \n  {:?}", &msg);
+            on_pong(seq, &msg)?;
+            success = true;
+            break;
+        }
+        if !success {
+            return Err(format!("A: gave up on seq {seq}"));
+        }
     }
     Ok(())
 }
@@ -101,7 +108,7 @@ async fn task_b(
     //the pingee and ponger
     let mut next_seq: u32 = 0;
     while let Some(msg) = from_a.recv().await {
-        println!("B: got {:?}", &msg);
+        println!("B: got \n {:?}", &msg);
 
         let pong = on_ping(next_seq, &msg)?;
         next_seq += 1;
