@@ -2,12 +2,12 @@ use std::time::Duration;
 use tokio::{sync::mpsc, time::timeout};
 
 fn main() {
-    println!("start");
+    println!("--------------------start--------------------");
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(run_async());
 
-    println!("end");
+    println!("--------------------end--------------------");
 }
 
 #[derive(Debug, PartialEq)]
@@ -22,7 +22,8 @@ struct Message {
     value: u32,
 }
 
-fn on_ping(expected: u32, msg: Message) -> Result<Message, String> {
+/// checks if ping is correct and returns a pong result or an error
+fn on_ping(expected: u32, msg: &Message) -> Result<Message, String> {
     if msg.label != MsgLabel::Ping {
         return Err(format!("bad label: expected ping, got {:?}", msg.label));
     }
@@ -36,7 +37,8 @@ fn on_ping(expected: u32, msg: Message) -> Result<Message, String> {
     return Ok(pong);
 }
 
-fn on_pong(expected: u32, msg: Message) -> Result<(), String> {
+/// checks if pong is correct and returns an ok or an error
+fn on_pong(expected: u32, msg: &Message) -> Result<(), String> {
     if msg.label != MsgLabel::Pong {
         return Err(format!("bad label: expected pong, got {:?}", msg.label));
     }
@@ -60,6 +62,7 @@ async fn task_a(tx: mpsc::Sender<Message>, mut ry: mpsc::Receiver<Message>) {
             value: i,
         };
 
+        println!("A: sending \n {:?}", &ping);
         if tx.send(ping).await.is_err() {
             println!("A: B dissapeared");
             break;
@@ -73,11 +76,11 @@ async fn task_a(tx: mpsc::Sender<Message>, mut ry: mpsc::Receiver<Message>) {
                 break;
             }
             Ok(Some(msg)) => {
-                if let Err(e) = on_pong(i, msg) {
+                println!("A: got \n {:?}", &msg);
+                if let Err(e) = on_pong(i, &msg) {
                     println!("A: {e}");
                     break;
                 }
-                println!("A: got pong {i}");
             }
             Ok(_) => {
                 println!("A: channel is closed");
@@ -91,14 +94,21 @@ async fn task_b(mut rx: mpsc::Receiver<Message>, ty: mpsc::Sender<Message>) {
     //the pingee and ponger
     let mut expected: u32 = 0;
     while let Some(msg) = rx.recv().await {
-        match on_ping(expected, msg) {
+        //handle recieved ping by responding with a pong
+        match on_ping(expected, &msg) {
             Ok(pong) => {
+                println!("B: got \n {:?}", &msg);
+                expected += 1;
+                //simulate packet loss. drop pong every third ping
+                if pong.value % 2 == 0 && pong.value != 0 {
+                    println!("SIM: B is dropping {:?}", &pong);
+                    continue;
+                }
+                println!("B: sending \n {:?}", pong);
                 if ty.send(pong).await.is_err() {
                     println!("B: Channel is closed");
                     break;
                 }
-                println!("B: got ping {expected}");
-                expected += 1;
             }
             Err(e) => {
                 println!("B: {e}");
