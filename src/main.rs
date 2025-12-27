@@ -32,5 +32,8 @@ async fn task_b(
     mut from_a: mpsc::Receiver<Packet>,
     to_a: mpsc::Sender<Packet>,
 ) -> Result<(), String> {
-    Ok(())
+    let mut rx = SAWReceiver::new();
+    while Some(pkt) = from_a.recv().await {
+        match rx.on_packet(pkt) {}
+    }
 }
