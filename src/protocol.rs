@@ -1,5 +1,3 @@
-use std::io::Error;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Packet {
     Data { seq: u32 },
@@ -80,26 +78,33 @@ impl SAWReceiver {
         // accept new data - seq==next_seq - advance and send ack
         // duplicate data - seq+1 == next_seq - resend last ack
         // everything else - error
-
-        match packet {
-            Packet::Data { seq } => {
-                if *seq == self.next_seq {
-                    let new_ack = Packet::Ack { seq: *seq };
-                    self.last_ack = Some(new_ack.clone());
-                    self.next_seq += 1;
-                    return ReceiverAction::Send(new_ack);
-                } else if *seq + 1 == self.next_seq {
-                    match &self.last_ack {
-                        Some(ack) => {
-                            return ReceiverAction::Send(ack.clone());
-                        }
-                        None => return ReceiverAction::Error("snopp".to_string()),
-                    }
-                } else {
-                    return ReceiverAction::Error("snopp".to_string());
-                }
+        let seq = match packet {
+            Packet::Data { seq } => *seq,
+            other => {
+                return ReceiverAction::Error(format!("Expected data packet. got {:?}", other));
             }
-            other => ReceiverAction::Error("knulla".to_string()),
+        };
+
+        // case new data
+        if seq == self.next_seq {
+            let ack = Packet::Ack { seq };
+
+            self.last_ack = Some(ack.clone());
+            self.next_seq += 1;
+
+            return ReceiverAction::Send(ack);
         }
+
+        // case duplicate
+        if seq + 1 == self.next_seq {
+            if let Some(ack) = &self.last_ack {
+                return ReceiverAction::Send(ack.clone());
+            } else {
+                return ReceiverAction::Error("Got duplicate data, but no last stored".to_string());
+            }
+        }
+
+        // case unexpected
+        return ReceiverAction::Error(format!("Expected {:?}. got {:?}", self.next_seq, seq));
     }
 }
