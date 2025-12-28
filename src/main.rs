@@ -1,4 +1,4 @@
-pub mod protocol;
+mod protocol;
 use crate::protocol::{Packet, ReceiverAction, SAWReceiver, SAWSender};
 use std::time::Duration;
 use tokio::{sync::mpsc, time::timeout};
@@ -33,16 +33,15 @@ async fn task_b(
     to_a: mpsc::Sender<Packet>,
 ) -> Result<(), String> {
     let mut rx = SAWReceiver::new();
-    while Some(pkt) = from_a.recv().await {
-        match rx.on_packet(pkt) {
-            ReceiverAction::Send(ack) => Ok(()),
-            ReceiverAction::Ignore => {
-                continue;
-            }
+    while let Some(pkt) = from_a.recv().await {
+        match rx.on_packet(&pkt) {
+            ReceiverAction::Send(ack) => to_a.send(ack).await.map_err(),
+            ReceiverAction::Ignore => {}
             ReceiverAction::Error(e) => {
                 println!("got error: {e}");
                 break;
             }
         }
     }
+    Ok(())
 }
