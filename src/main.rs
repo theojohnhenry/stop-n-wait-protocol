@@ -34,6 +34,15 @@ async fn task_b(
 ) -> Result<(), String> {
     let mut rx = SAWReceiver::new();
     while Some(pkt) = from_a.recv().await {
-        match rx.on_packet(pkt) {}
+        match rx.on_packet(pkt) {
+            ReceiverAction::Send(ack) => Ok(()),
+            ReceiverAction::Ignore => {
+                continue;
+            }
+            ReceiverAction::Error(e) => {
+                println!("got error: {e}");
+                break;
+            }
+        }
     }
 }
