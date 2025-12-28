@@ -35,12 +35,12 @@ async fn task_b(
     let mut rx = SAWReceiver::new();
     while let Some(pkt) = from_a.recv().await {
         match rx.on_packet(&pkt) {
-            ReceiverAction::Send(ack) => to_a.send(ack).await.map_err(),
+            ReceiverAction::Send(ack) => to_a
+                .send(ack)
+                .await
+                .map_err(|_e| "B:channel closed".to_string())?,
             ReceiverAction::Ignore => {}
-            ReceiverAction::Error(e) => {
-                println!("got error: {e}");
-                break;
-            }
+            ReceiverAction::Error(e) => return Err(e),
         }
     }
     Ok(())
