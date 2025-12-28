@@ -1,5 +1,6 @@
 mod protocol;
 use crate::protocol::{Packet, ReceiverAction, SAWReceiver, SAWSender};
+use rand::Rng;
 use std::time::Duration;
 use tokio::{sync::mpsc, time::timeout};
 
@@ -19,6 +20,11 @@ async fn run_async() -> Result<(), String> {
     ra?;
     rb?;
     Ok(())
+}
+
+fn should_drop(drop_chance: f64) -> bool {
+    let mut rng = rand::thread_rng();
+    rng.gen_bool(drop_chance)
 }
 
 async fn client_a(
@@ -72,9 +78,13 @@ async fn server_b(
         match rx.on_packet(&inc_pkt) {
             ReceiverAction::Send(ack) => {
                 println!("B sending {:?}", ack);
-                to_a.send(ack)
-                    .await
-                    .map_err(|_e| "B:channel closed".to_string())?
+                if should_drop(0.2) {
+                    println!("SIM: B dropping {:?}", ack)
+                } else {
+                    to_a.send(ack)
+                        .await
+                        .map_err(|_e| "B:channel closed".to_string())?
+                }
             }
             ReceiverAction::Ignore => {}
             ReceiverAction::Error(e) => return Err(e),
